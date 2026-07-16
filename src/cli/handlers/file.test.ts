@@ -45,6 +45,7 @@ vi.mock('../runtime-client', () => {
 })
 
 import { main } from '../index'
+import { RuntimeRpcFailureError } from '../runtime-client'
 import { buildWorktree, okFixture, queueFixtures, worktreeListFixture } from '../test-fixtures'
 
 describe('orca file CLI handlers', () => {
@@ -85,6 +86,29 @@ describe('orca file CLI handlers', () => {
       relativePath: 'src/App.tsx'
     })
     expect(vi.mocked(console.log).mock.calls[0][0]).toBe('Opened src/App.tsx.')
+  })
+
+  it('reports a missing file as a JSON failure with a nonzero exit code', async () => {
+    const priorExitCode = process.exitCode
+    queueFixtures(callMock, worktreeListFixture([buildWorktree('/tmp/repo', 'feature')]))
+    callMock.mockRejectedValueOnce(
+      new RuntimeRpcFailureError({
+        id: 'req_open',
+        ok: false,
+        error: { code: 'runtime_error', message: 'File not found: docs/missing.md' },
+        _meta: { runtimeId: 'runtime-1' }
+      })
+    )
+
+    await main(['file', 'open', 'docs/missing.md', '--json'], '/tmp/repo')
+
+    expect(JSON.parse(String(vi.mocked(console.log).mock.calls[0][0]))).toMatchObject({
+      ok: false,
+      error: { code: 'runtime_error', message: 'File not found: docs/missing.md' }
+    })
+    expect(process.exitCode).toBe(1)
+
+    process.exitCode = priorExitCode
   })
 
   it('opens a staged diff for an explicit worktree without cwd inference', async () => {

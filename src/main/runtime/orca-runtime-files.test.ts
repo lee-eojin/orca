@@ -248,6 +248,8 @@ describe('RuntimeFileCommands', () => {
   it('opens text files through the renderer host (inheriting active runtime env)', async () => {
     const openFile = vi.fn()
     const { commands } = createRuntimeFileCommands({ openFile })
+    resolveAuthorizedPathMock.mockImplementation(async (path: string) => path)
+    statMock.mockResolvedValue(mockStats(12, 3))
 
     const result = await commands.openMobileFile('id:wt-1', 'docs/readme.md')
 
@@ -268,6 +270,8 @@ describe('RuntimeFileCommands', () => {
   it('opens previewable images through the renderer host as an image tab', async () => {
     const openFile = vi.fn()
     const { commands } = createRuntimeFileCommands({ openFile })
+    resolveAuthorizedPathMock.mockImplementation(async (path: string) => path)
+    statMock.mockResolvedValue(mockStats(12, 3))
 
     const result = await commands.openMobileFile('id:wt-1', 'assets/logo.png')
 
@@ -288,6 +292,8 @@ describe('RuntimeFileCommands', () => {
   it('leaves non-previewable binaries unavailable on mobile', async () => {
     const openFile = vi.fn()
     const { commands } = createRuntimeFileCommands({ openFile })
+    resolveAuthorizedPathMock.mockImplementation(async (path: string) => path)
+    statMock.mockResolvedValue(mockStats(12, 3))
 
     const result = await commands.openMobileFile('id:wt-1', 'dist/bundle.zip')
 
@@ -298,6 +304,43 @@ describe('RuntimeFileCommands', () => {
       kind: 'binary',
       opened: false
     })
+  })
+
+  it('rejects a missing local file before opening a renderer tab', async () => {
+    const openFile = vi.fn()
+    const { commands } = createRuntimeFileCommands({ openFile })
+    resolveAuthorizedPathMock.mockImplementation(async (path: string) => path)
+    statMock.mockRejectedValue(enoent())
+
+    await expect(commands.openMobileFile('id:wt-1', 'docs/missing.md')).rejects.toThrow(
+      'File not found: docs/missing.md'
+    )
+
+    expect(openFile).not.toHaveBeenCalled()
+  })
+
+  it('rejects a missing SSH file before opening a renderer tab', async () => {
+    const openFile = vi.fn()
+    const stat = vi.fn().mockRejectedValue(new Error('ENOENT: no such file'))
+    const { commands } = createRuntimeFileCommands({
+      openFile,
+      resolveRuntimeFileTarget: vi.fn(async () => ({
+        worktree: {
+          id: 'wt-1',
+          repoId: 'repo-1',
+          path: '/repo'
+        },
+        connectionId: 'ssh-1'
+      }))
+    })
+    vi.mocked(getSshFilesystemProvider).mockReturnValue({ stat } as never)
+
+    await expect(commands.openMobileFile('id:wt-1', 'docs/missing.md')).rejects.toThrow(
+      'File not found: docs/missing.md'
+    )
+
+    expect(stat).toHaveBeenCalledWith('/repo/docs/missing.md')
+    expect(openFile).not.toHaveBeenCalled()
   })
 
   it('does not follow symlinks when reading runtime-local file explorer dirs', async () => {

@@ -248,10 +248,12 @@ export class RuntimeFileCommands {
     worktreeSelector: string,
     relativePath: string
   ): Promise<RuntimeFileOpenResult> {
-    const { worktree } = await this.host.resolveRuntimeFileTarget(worktreeSelector)
+    const { worktree, connectionId } = await this.host.resolveRuntimeFileTarget(worktreeSelector)
     if (!isSafeMobileRelativePath(relativePath)) {
       throw new Error('invalid_relative_path')
     }
+    const filePath = joinWorktreeRelativePath(worktree.path, relativePath)
+    await this.assertMobileFileExists(filePath, relativePath, connectionId)
     // Previewable images open like text (the mobile viewer renders them via
     // files.readPreview); other binaries stay unavailable on mobile.
     const kind = isMobilePreviewableImagePath(relativePath)
@@ -264,7 +266,6 @@ export class RuntimeFileCommands {
     if (kind === 'binary') {
       return { worktree: worktree.id, relativePath, kind, opened: false }
     }
-    const filePath = joinWorktreeRelativePath(worktree.path, relativePath)
     // Why: the service's internal runtimeId is not a registered runtime env selector
     // (those live in orca-environments.json). Passing it caused Unknown environment
     // errors on content load for CLI-initiated opens (via files.open from orca cli
@@ -273,6 +274,32 @@ export class RuntimeFileCommands {
     // allowing correct routing for local vs remote envs.
     this.host.openFile(worktree.id, filePath, relativePath, undefined)
     return { worktree: worktree.id, relativePath, kind, opened: true }
+  }
+
+  private async assertMobileFileExists(
+    filePath: string,
+    relativePath: string,
+    connectionId?: string
+  ): Promise<void> {
+    try {
+      if (connectionId) {
+        const provider = getSshFilesystemProvider(connectionId)
+        if (!provider) {
+          throw new Error(SSH_FILESYSTEM_PROVIDER_UNAVAILABLE_MESSAGE)
+        }
+        await provider.stat(filePath)
+        return
+      }
+      await stat(await resolveAuthorizedPath(filePath, this.host.requireStore()))
+    } catch (error) {
+      if (
+        isENOENT(error) ||
+        (connectionId && RuntimeFileCommands.isRemoteNotFoundErrorMessage(error))
+      ) {
+        throw new Error(`File not found: ${relativePath}`)
+      }
+      throw error
+    }
   }
 
   async openMobileDiff(
